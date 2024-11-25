@@ -1,19 +1,10 @@
-/// Module: small_shop
-module small_shop::small_shop{
-    use std::string::String;
+module small_shop::better_shop{
+    use sui::table::{Table, new};
     use std::ascii::String as AString;
-    // use std::debug::print;
-    use sui::dynamic_field as df;
-    // use sui::dynamic_object_field as dof;
     use sui::balance::{Self, Balance};
-    // use sui::sui::SUI;
-    use sui::coin::{Self, Coin};
+    use std::string::String;
     use std::type_name::{Self,};
-
-    public struct Item has store{
-        name: String,
-        price: u64,
-    }
+    use sui::coin::{Self, Coin};
 
     public struct Shop<phantom T> has key, store{
         id:  UID,
@@ -22,6 +13,7 @@ module small_shop::small_shop{
         balance: Balance<T>,
         owner: address,
         trade_coin: AString,
+        items: Table<String, u64>,
     }
 
     public fun create_shop<T>(name: String, description: String, ctx: &mut TxContext){
@@ -33,34 +25,41 @@ module small_shop::small_shop{
             balance: balance::zero<T>(),
             owner: ctx.sender(),
             trade_coin: coin_type.into_string(),
+            items: new<String, u64>(ctx),
         };
         transfer::public_share_object(shop);
     }
 
-    public fun add_item<T>(shop:&mut Shop<T>, name: String, price: u64, ctx: &mut TxContext){
+    public fun add_item<T>(shop: &mut Shop<T>, name: String, price: u64, ctx: &mut TxContext){
         assert!(ctx.sender() == shop.owner, 1);
-        let item : Item = Item{
-            name: name,
-            price: price,
-        };
+        assert!(!shop.items.contains(name), 1);
+        shop.items.add(name, price);
+    }
 
-        df::add(&mut shop.id, name, item);
+    public fun remove_item<T>(shop: &mut Shop<T>, name: String, ctx: &mut TxContext){
+        assert!(ctx.sender() == shop.owner, 1);
+        assert!(shop.items.contains(name), 1);
+        shop.items.remove(name);
+    }
+
+    public fun update_item<T>(shop: &mut Shop<T>, name: String, price: u64, ctx: &mut TxContext){
+        assert!(ctx.sender() == shop.owner, 1);
+        assert!(shop.items.contains(name), 1);
+        assert!(shop.items.borrow(name) != price, 1);
+        *shop.items.borrow_mut(name) = price;
     }
 
     public fun buy_item<T>(shop: &mut Shop<T>, name: String, pay_coin: Coin<T>){
-        assert!(df::exists_(&shop.id, name), 1);
+        assert!(shop.items.contains(name), 1);
         let amount = pay_coin.value();
         let coin_balance : Balance<T> = pay_coin.into_balance();
-        
+    
         let coin_type = type_name::get<T>();
-        // print(&coin_type.into_string());
         assert!(&coin_type.into_string() == shop.trade_coin, 1);
-        
-        let item : &Item = df::borrow(&shop.id, name);
-        // print(&amount);
-        // print(&coin_balance);
-        assert!(amount == item.price, 2);
-        balance::join(&mut shop.balance, coin_balance);  
+
+        let price = shop.items.borrow(name);
+        assert!(amount == price, 2);
+        balance::join(&mut shop.balance, coin_balance);
     }
 
     public fun withdraw_all<T>(shop: &mut Shop<T>, ctx: &mut TxContext){
@@ -80,8 +79,4 @@ module small_shop::small_shop{
         transfer::public_transfer(shop_balance, shop.owner);
     }
 
-    // #[test_only]
-    // public fun call_init(ctx: &mut TxContext) {
-    //     init(ctx);
-    // }
 }
